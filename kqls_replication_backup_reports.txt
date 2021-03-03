@@ -1,0 +1,50 @@
+///////////////////////////////////
+
+// TABLES 
+
+//////////////////////////////////
+
+// RPO for Azure VMs for last 24hrs
+AzureDiagnostics   
+| where isnotempty(name_s) and isnotnull(name_s)    and TimeGenerated >= ago(24h)  
+| summarize hint.strategy=partitioned arg_max(TimeGenerated, *) by name_s   
+| project VirtualMachine = name_s , Vault = Resource , ReplicationHealth = replicationHealth_s, Status = protectionState_s, RPO_in_seconds = rpoInSeconds_d, TestFailoverStatus = failoverHealth_s, AgentVersion = agentVersion_s, ReplicationError = replicationHealthErrors_s, SourceLocation = primaryFabricName_s, replicationProviderName_s
+| order by ReplicationHealth asc
+
+// Events for Site Recovery last 72hrs
+AzureDiagnostics   
+| where Category == "AzureSiteRecoveryEvents"   
+| where TimeGenerated >= ago(72h)   
+| project TimeGenerated, AffectedObject=affectedResourceName_s , VaultName = Resource, Description_s = healthErrors_s , Severity = Level
+
+//////////////////////////////////////////
+
+// Charts or raw data
+
+/////////////////////////////////////////
+
+// Distribution of ASR Jobs piechart
+AddonAzureBackupJobs
+| summarize count(JobUniqueId) by JobStatus
+
+// RPOs for healthy Replications barchart
+AzureDiagnostics  
+| where isnotempty(name_s) and isnotnull(name_s)    and replicationHealth_s  !=  'Critical'
+| summarize hint.strategy=partitioned arg_max(TimeGenerated, *) by name_s   
+| project VirtualMachine = name_s , Vault = Resource , ReplicationHealth = replicationHealth_s, Status = protectionState_s, RPO_in_seconds = rpoInSeconds_d, TestFailoverStatus = failoverHealth_s, replicationProviderName_s, AgentVersion = agentVersion_s, ReplicationError = replicationHealthErrors_s
+| order by RPO_in_seconds asc 
+
+// Backupjob duration by Item last 24hrs barchart
+AddonAzureBackupJobs
+| project substring(BackupItemUniqueId, 26), JobStartDateTime, JobDurationInSecs, DataTransferredInMB, JobStatus, BackupManagementType
+| where JobStartDateTime  > now() - 24h
+| order by JobDurationInSecs, DataTransferredInMB
+| project-rename ReplicationItem = Column1
+
+// 10 Biggest backups piechart
+AddonAzureBackupStorage
+| project substring(ProtectedContainerUniqueId, 26), StorageConsumedInMBs, _ResourceId
+| where StorageConsumedInMBs > 0
+| order by StorageConsumedInMBs desc 
+| project-rename ReplicationItem = Column1
+|take 10 
